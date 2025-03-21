@@ -1,55 +1,61 @@
-from flask import Flask, render_template, request, redirect
+from flask import Flask, render_template, request, redirect, url_for
+from datetime import datetime
 
 app = Flask(__name__)
 TASKS_FILE = "To_do.txt"
 
+# Load tasks from file
 def load_tasks():
-    """Load tasks from file."""
     try:
         with open(TASKS_FILE, "r") as f:
-            return [task.strip() for task in f.readlines()]
+            tasks = []
+            for line in f.readlines():
+                parts = line.strip().split(" | ")
+                if len(parts) == 4:  # Ensure the correct format
+                    tasks.append({"id": int(parts[0]), "task": parts[1], "due": parts[2], "completed": parts[3] == "True"})
+            return tasks
     except FileNotFoundError:
         return []
 
+# Save tasks to file
 def save_tasks(tasks):
-    """Save tasks to file."""
     with open(TASKS_FILE, "w") as f:
-        f.writelines([task + "\n" for task in tasks])
+        for task in tasks:
+            f.write(f"{task['id']} | {task['task']} | {task['due']} | {task['completed']}\n")
 
 @app.route("/")
 def index():
-    """Display the To-Do List."""
     tasks = load_tasks()
-    return render_template("index.html", tasks=enumerate(tasks))
+    tasks.sort(key=lambda t: datetime.strptime(t["due"], "%Y-%m-%dT%H:%M") if t["due"] else datetime.max)
+    return render_template("index.html", tasks=tasks)
 
 @app.route("/add", methods=["POST"])
 def add_task():
-    """Add a new task."""
     task = request.form.get("task")
-    if task:
+    due = request.form.get("due")
+    if task and due:
         tasks = load_tasks()
-        tasks.append(task)
+        new_id = max([t["id"] for t in tasks], default=0) + 1  # Assign a unique ID
+        tasks.append({"id": new_id, "task": task, "due": due, "completed": False})
         save_tasks(tasks)
-    return redirect("/")
+    return redirect(url_for("index"))
 
-@app.route("/complete/<int:task_id>")
+@app.route("/complete/<int:task_id>", methods=["POST"])
 def complete_task(task_id):
-    """Mark a task as completed."""
     tasks = load_tasks()
-    if 0 <= task_id < len(tasks):
-        if "[Completed]" not in tasks[task_id]:
-            tasks[task_id] += " [Completed]"
-            save_tasks(tasks)
-    return redirect("/")
+    for task in tasks:
+        if task["id"] == task_id:
+            task["completed"] = not task["completed"]  # Toggle completion
+            break
+    save_tasks(tasks)
+    return redirect(url_for("index"))
 
-@app.route("/delete/<int:task_id>")
+@app.route("/delete/<int:task_id>", methods=["POST"])
 def delete_task(task_id):
-    """Delete a task."""
     tasks = load_tasks()
-    if 0 <= task_id < len(tasks):
-        del tasks[task_id]
-        save_tasks(tasks)
-    return redirect("/")
+    tasks = [task for task in tasks if task["id"] != task_id]  # Delete by ID
+    save_tasks(tasks)
+    return redirect(url_for("index"))
 
 if __name__ == "__main__":
     app.run(debug=True)
